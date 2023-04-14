@@ -1,0 +1,104 @@
+%% model events as poission processes.  Each event has a randomly set lambda
+nEventTypes=10;     % how many behavioral events or stimuli do we track?
+bins=100000;        % # of time bins
+dt=0.05;            % ms per bin
+tRange=dt*(1:bins); % useful for plotting
+maxLambda=.2;       % this is the maximum lambda that an event rate can have
+lambda=randi(round(maxLambda*100), 1, nEventTypes)*dt/100; % make some random lambdas for each event class
+
+events=poissrnd(repmat(lambda, bins, 1), [bins nEventTypes]); % generate event time series
+
+% make a small gaussian filter to strength out the events (and their
+% influence on neuron firing rates)
+gaussStretch=2;
+b = normpdf((-4:4)/gaussStretch);
+b=b/max(b);
+
+eventsFiltered=filter(b,1,events); % filter them
+% needed to flip
+events=events';
+eventsFiltered=eventsFiltered';
+
+%% map to cells
+nNeurons=5; % how many
+baseLambda=rand(nNeurons, 1)+0.5; % basal firing rate of each neuron 0.5->1.5
+linkProbability=0.2; % what is the probability that a neuron "hears" an event type
+linked=rand(nNeurons, nEventTypes)<=linkProbability; % make random links
+
+linkStrength=linked.*(2*rand(nNeurons, nEventTypes)-0.2); % set strengths to the ones that are linked
+% I randomly set how much a linked event can alter a neuron firing to be
+% 0.2 to 1.8 Hz 
+
+neuronRates=max(baseLambda+linkStrength*eventsFiltered, 0); % model neuron firing rates, keep positive
+neuronFiring=poissrnd(neuronRates); % model neuron firing
+
+%% prepare time shift matrix of events for the glm
+maxShifts=5; % how many +/- bins to consider for glm
+shifts=-maxShifts:maxShifts;
+nShifts=length(shifts);
+allEvents=zeros(nEventTypes*length(shifts), bins);
+for counter=1:nShifts
+    e2=circshift(events, shifts(counter), 2);
+    allEvents(nShifts*((1:nEventTypes)-1)+counter, :)=e2;
+end
+
+%% setup for doing glms
+testNeuron=1:nNeurons;
+% a small gaussian filter used below to test how good the coefficients are
+
+b = normpdf(shifts/gaussStretch);
+b=b/max(b);
+
+%% do glms 
+% we fit the spiking rate but look at the reconstruction of the 
+% underlying time varying rates.  I guess we really model the lambdas, but
+% same thing here
+
+for neuronIndex=testNeuron
+    figure('NumberTitle','off', 'Name', ['neuron ' num2str(neuronIndex)])
+    set(gcf, 'Position', [  99         549        1386         317])
+
+    % run model with filtered events.  This is cheating because it 
+    % knows the dyanmics of the relationship between an event and
+    % modulation of a neuron. Sanity check
+    mdl=fitglm(eventsFiltered', neuronFiring(neuronIndex,:)', ...
+        'linear', 'Distribution', 'poisson', 'Link', 'identity'); 
+    % note you need to let it use the "intercept" because we set a basal
+    % firing rate.  Maybe with real data, you have to add 'Intercept', false
+
+    subplot(1, 5, 1)
+    plot(mdl.Coefficients.Estimate(2:end)', 'DisplayName', 'model coeffs')
+    hold on
+    plot(linkStrength(neuronIndex,:), 'DisplayName', 'underlying');
+    legend
+    title('all info')
+
+    % run model with time shifted events. This is what we would do
+    mdl=fitglm(allEvents', neuronFiring(neuronIndex,:)', 'linear', 'Link', 'identity'); 
+    % You can add 'Distribution', 'poisson' but I find that I get identical
+    % results and without it, it runs much faster and converges better
+    % Maybe it gets the right answer with a linear link  
+    % because of the smearing and summing across multiple poisson
+    % processes?
+
+    subplot(1, 5, 2)
+    plot(mdl.Coefficients.Estimate(2:end)', 'DisplayName', 'model coeffs')
+    hold on
+    ll=b'*linkStrength(neuronIndex,:);
+    ll=reshape(ll, [1 numel(ll)]);
+    plot(maxShifts-1+(1:length(ll)), ll, 'DisplayName', 'underlying')
+    legend
+    title('shifts')
+
+    % reconstruct the underlying rates, not the spiking!
+    yy=predict(mdl, allEvents');
+
+    subplot(1, 5, 3:5)
+    plot(yy, 'DisplayName','recon rate')
+    hold on
+    plot(neuronRates(neuronIndex, :), 'DisplayName','underlying')
+    legend
+    title('reconstruction')
+end
+
+

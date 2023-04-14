@@ -1,0 +1,199 @@
+%% set things up
+sessionsToAnalyze=who('processed_WT*')';
+dataQuantiles=[-Inf 1 0.001 Inf];
+dataQuantiles=[-Inf .5 1.5 2.5 3.5 4.5 5.5 6.5 7.5 8.5 15.5 Inf];
+
+nQuantiles=length(dataQuantiles)-1;
+quantilePrefix='Aa_';
+
+building=[];
+for session=sessionsToAnalyze
+    disp(['Aggregating from ' session{1}]);
+
+    assignin('base', 'processed', eval(session{1}));
+
+    % fix errors in centerOutTimes
+    errorTimes=find(processed.trialTable.photometryCenterOutIndex(1:(end-1))==processed.trialTable.photometryCenterOutIndex(2:end));
+    errorTimes=intersect(errorTimes, find(processed.trialTable.hasAllPhotometryData));
+    processed.trialTable.photometryCenterOutIndex(errorTimes)=processed.trialTable.photometryCenterInIndex(errorTimes);
+
+%     delayTime=processed.trialTable.photometrySideInIndex-processed.trialTable.photometryCenterInIndex;
+%     delayTime=delayTime(processed.trialTable.hasAllPhotometryData);
+
+%  %   do something with photometry data
+%     trialsToAnalyze=find(...
+%         processed.trialTable.wordLabel=='aa' & ...
+%         processed.trialTable.hasAllPhotometryData ...
+%         );
+%     [mReturn, returnError]=...
+%         extractMatrix(processed.signals{6}, processed.trialTable.photometrySideInIndex(trialsToAnalyze), params.ptsKeep_before, params.ptsKeep_after);
+% %    mMean=mean(mReturn(:, params.ptsKeep_before+2:params.ptsKeep_before+17), 2); % the reward    window
+%     mMean=mean(mReturn(:, 42:48), 2); % baseline
+
+    trialsToAnalyze=find(...
+        processed.trialTable.hasAllPhotometryData & ...
+        ~processed.trialTable.wasRewarded...
+        );
+    [mReturn, returnError]=...
+        extractMatrix(processed.signals{1}, processed.trialTable.photometrySideInIndex(trialsToAnalyze), params.ptsKeep_before, params.ptsKeep_after);
+%    mMean=mean(mReturn(:, params.ptsKeep_before+2:params.ptsKeep_before+17), 2); % the reward    window
+    mMean=mean(mReturn(:, 42:47), 2); % baseline % negative dip
+
+    keepData=mMean;
+    keepData=processed.trialTable.trialsSinceSwitch;
+    keepData=processed.trialTable.photometryCenterInIndex(2:end)-processed.trialTable.photometrySideOutIndex(1:end-1);
+
+%      trialsToAnalyze=find(...
+%          processed.trialTable.hasAllPhotometryData ...
+%          & processed.trialTable.wasRewarded...
+%          );
+%     nLicks=processed.trialTable.photometryNumLicks(trialsToAnalyze);
+%     keepData=nLicks;
+
+    building=[building keepData'];
+
+end
+
+dataQuantiles=[-inf quantile(building, nQuantiles-1) inf];
+%dataQuantiles=[1 5 10 20 Inf];
+dataQuantiles=[-Inf .5 1.5 2.5 3.5 4.5 5.5 6.5 7.5 8.5 15.5 Inf];
+nQuantiles=length(dataQuantiles)-1;
+
+conditionsList=cell(1, nQuantiles);
+for qCounter=1:nQuantiles
+    conditionsList{qCounter}=[quantilePrefix 'q' num2str(qCounter)];
+end
+
+%% run the loops
+% alignmentCodeList={'CI', 'CO', 'SI', 'SO', 'FL'};
+% aligmentColumn={ ...
+%     'photometryCenterInIndex', ...
+%     'photometryCenterOutIndex', ...
+%     'photometrySideInIndex', ...
+%     'photometrySideOutIndex', ...
+%     'photometryFirstLickIndex' ...
+%     };
+
+alignmentCodeList={'SI'};
+aligmentColumn={ ...
+    'photometrySideInIndex' ...
+    };
+
+nInQuantiles=zeros(1, nQuantiles);
+switchedAfter=nInQuantiles;
+switchedBefore=nInQuantiles;
+rewardedBefore=nInQuantiles;
+nLicks=nInQuantiles;
+trialsSinceSwitch=nInQuantiles;
+trialsToSwitch=nInQuantiles;
+
+for session=sessionsToAnalyze
+    disp(['Processing ' session{1}]);
+
+    assignin('base', 'processed', eval(session{1}));
+
+    params=processed.params;
+
+    didSwitchTrial=1+find(processed.trialTable.choseLeft(2:end) ~= processed.trialTable.choseLeft(1:(end-1)));
+    didntSwitchTrial=1+find(processed.trialTable.choseLeft(2:end) == processed.trialTable.choseLeft(1:(end-1)));
+    willSwitchTrial=find(processed.trialTable.choseLeft(2:end) ~= processed.trialTable.choseLeft(1:(end-1)));
+    wontSwitchTrial=find(processed.trialTable.choseLeft(2:end) == processed.trialTable.choseLeft(1:(end-1)));
+    followsReward=1+find(processed.trialTable.wasRewarded(1:(end-1)));
+    doesntFollowsReward=1+find(~processed.trialTable.wasRewarded(1:(end-1)));
+    wasRewarded=find(processed.trialTable.wasRewarded);
+    wasNotRewarded=find(~processed.trialTable.wasRewarded);
+
+
+    imTimes=params.finalTimeStep*(-params.ptsKeep_before:params.ptsKeep_after);
+    totalPointsToKeep=params.ptsKeep_before+params.ptsKeep_after+1;
+
+    minPtsOffset=params.signalDetrendWindow/2;
+    finalSamples=max(params.finalSamples);
+
+    hasP=find(...
+        processed.trialTable.isPhotometryTrial ...
+        & (processed.trialTable.photometryCenterInIndex>(params.ptsKeep_before+minPtsOffset)) ...
+        & (processed.trialTable.photometrySideOutIndex<(finalSamples-params.ptsKeep_after))...
+        );
+
+%      Aa=find(processed.trialTable.wordLabel=='aa');
+%      hasP=intersect(hasP, Aa);
+     hasP=intersect(hasP, wasNotRewarded);
+ %    hasP=intersect(hasP, didntSwitchTrial);
+  %   hasP=intersect(hasP, willSwitchTrial);
+
+  %   isAa=find(processed.trialTable.wordLabel=='Aa');
+   %  hasP=intersect(hasP, isAa);
+%     hasP=intersect(hasP, doesntFollowsReward);
+%     hasP=intersect(hasP, didntSwitchTrial);
+    
+
+%    dataToBreakUp=processed.trialTable.photometrySideInIndex-processed.trialTable.photometryCenterOutIndex;
+
+    [mReturn, returnError]=...
+        extractMatrix(processed.signals{1}, processed.trialTable.photometrySideInIndex, params.ptsKeep_before, params.ptsKeep_after);
+%     mMean=mean(mReturn(:, params.ptsKeep_before+2:params.ptsKeep_before+17), 2);
+    mMean=mean(mReturn(:, 42:47), 2); % baseline
+
+%    dataToBreakUp=mMean;
+%    dataToBreakUp=processed.trialTable.photometryNumLicks;
+    dataToBreakUp=processed.trialTable.trialsSinceSwitch;
+%    dataToBreakUp=processed.trialTable.trialsToSwitch;
+    
+
+%   dataToBreakUp=processed.trialTable.trialsSinceSwitch;
+%     dataToBreakUp=processed.trialTable.photometryNumLicks;
+
+    for qCounter=1:nQuantiles
+        qStart=dataQuantiles(qCounter);
+        qEnd=dataQuantiles(qCounter+1);
+        
+        qTrials=intersect(hasP, ...
+            find(...
+                dataToBreakUp>qStart & ...
+                dataToBreakUp<=qEnd ...
+            ));
+
+        if ~isempty(qTrials) && qTrials(end)==size(processed.trialTable, 1)
+            qTrials=qTrials(1:(end-1));
+        end
+
+        nInQuantiles(qCounter)=nInQuantiles(qCounter)+length(qTrials);
+        
+        switchedAfter(qCounter)=switchedAfter(qCounter) + ...
+            sum(processed.trialTable.choseLeft(qTrials)~=processed.trialTable.choseLeft(qTrials+1));
+        switchedBefore(qCounter)=switchedBefore(qCounter) + ...
+            sum(processed.trialTable.choseLeft(qTrials)~=processed.trialTable.choseLeft(qTrials-1));
+        rewardedBefore(qCounter)=rewardedBefore(qCounter) + ...
+            sum(processed.trialTable.wasRewarded(qTrials-1));
+        nLicks(qCounter)=nLicks(qCounter) + ...
+            sum(processed.trialTable.photometryNumLicks(qTrials));
+        trialsSinceSwitch(qCounter)=trialsSinceSwitch(qCounter) + ...
+            sum(processed.trialTable.trialsSinceSwitch(qTrials));
+        trialsToSwitch(qCounter)=trialsToSwitch(qCounter) + ...
+            sum(processed.trialTable.trialsToSwitch(qTrials));
+
+        assignin('base', conditionsList{qCounter}, qTrials);
+    end
+
+    processConditions;
+%    anaCrossCor
+    assignin('base', session{1}, processed);
+
+%     pGraph(processed.ph.CI, conditionsList, 6);
+%     title(removeDash(session{1}))
+%     drawnow
+end
+
+ccc={}; for cc=1:length(conditionsList); ccc(cc)={conditionsList(cc)}; end
+sumAll
+
+dataQuantiles
+nInQuantiles
+switchedAfter=100*switchedAfter./nInQuantiles
+switchedBefore=100*switchedBefore./nInQuantiles
+rewardedBefore=100*rewardedBefore./nInQuantiles
+nLicks=nLicks./nInQuantiles
+trialsSinceSwitch=trialsSinceSwitch./nInQuantiles
+trialsToSwitch=trialsToSwitch./nInQuantiles
+

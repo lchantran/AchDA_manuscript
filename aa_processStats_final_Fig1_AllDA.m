@@ -1,0 +1,49 @@
+%% Setup analysis
+testFraction=0.3;
+trainFraction=1-testFraction;
+
+nModels=100;
+alphaForTTest=0.05;
+rerunOldAnalysisSet=true;
+
+randomShuffle=false;  % set to true for label shuffle control
+zScoreAllData=false; % normalize the data acorss all sessions before doing analysis.  Doesn't seem to affect LDA/SVM performance at all so leave it off to have summary statistics in natural units
+
+runSVMhyp=false;
+runLDAhyp=true;
+
+channelsToAnalyze=[1];
+
+swappedChannelMice={'WT8', 'WT9', 'WT10', 'WT11', 'WT21', 'WT22'}; % Use channel 6 in these mice
+saveName='Figure1_DA_Rew_NoRew';
+
+
+
+%% set up the definitions of the conditions to compare
+
+% {groupingCode : all mouse theseSessions
+%               all - take all the sessions that match in "groupsToAnalyze"
+%                   below and mix all the data across them
+%               mouse - take all the sessions for a particular mouse and
+%                   mix across them
+%               theseSessions - take only the seesions that are addded
+%                   as an extra parameter 4 in the condition def
+%       active : true false
+%       analysisMode : trials or means
+%       nCondition x {condition, event, [pointsBeforeEvent pointsAfterEvent]}
+
+startDrop=0;
+preN=18;
+rewN=18;
+norewN=18;
+
+conditionSets={};
+
+% are reward and no reward different before and after the SI
+conditionSets{end+1}={'Rew/NoRew' 'mouse' 'trials'          {'Rew', 'SI', [startDrop norewN]}   {'NoRew', 'SI', [startDrop norewN]}}; % done
+conditionSets{end+1}={'Rew/NoRew(Pre)' 'mouse' 'trials'     {'Rew', 'SI', [preN -startDrop]}   {'NoRew', 'SI', [preN -startDrop]}}; % done
+
+
+%%
+processStats_SIMPLE
+
